@@ -1,9 +1,11 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
 import json
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Load model and metadata
 model = joblib.load('model/best_heart_disease_model.joblib')
@@ -31,16 +33,20 @@ CATEGORICAL_OPTIONS = {
     'SkinCancer': ['yes', 'no']
 }
 
+# Initialize session state
+if "predicted" not in st.session_state:
+    st.session_state["predicted"] = False
+
 # Sidebar content
 with st.sidebar:
     st.header("About This App")
     st.markdown("""
-    - **Model**: XGBoost Classifier
+    - **Model**: XGBoost Classifier  
     - **Training Data**: CDC 2020 Behavioral Risk Factor Surveillance System  
-    - **Key Features**:
-        - 17 health & demographic factors
+    - **Key Features**:  
+        - 17 health & demographic factors  
         - Optimized for early detection  
-    - **Default Threshold**: 0.12 (30% recall)
+    - **Default Threshold**: 0.12 (30% recall)  
     """)
 
     st.header("Prediction Threshold")
@@ -61,7 +67,7 @@ with st.sidebar:
     - **Threshold Adjustment**:  
         - ↑ Threshold → Fewer false positives  
         - ↓ Threshold → More true positives  
-    - **ROC Curve**: Shows model's true positive vs false positive rate  
+    - **Feature Importance**: View most influential health factors  
     """)
 
     st.warning("⚠️ This tool provides risk estimates, not medical diagnoses. Consult a healthcare professional for medical advice.")
@@ -77,14 +83,12 @@ Adjust the threshold in the sidebar to balance sensitivity and specificity.
 with st.form("prediction_form"):
     st.header("Patient Information")
 
-    # Numerical inputs
     cols = st.columns(4)
-    bmi = cols[0].number_input('BMI', min_value=10.0, max_value=50.0, value=25.0)
+    bmi = cols[0].number_input('BMI', 10.0, 50.0, 25.0)
     physical_health = cols[1].number_input('Physical Health Days (past 30 days)', 0, 30, 0)
     mental_health = cols[2].number_input('Mental Health Days (past 30 days)', 0, 30, 0)
     sleep_time = cols[3].number_input('Sleep Hours (per 24h)', 1.0, 24.0, 7.0)
 
-    # Categorical inputs
     st.subheader("Health History & Behaviors")
     cols = st.columns(3)
     smoking = cols[0].selectbox('Smoker', CATEGORICAL_OPTIONS['Smoking'])
@@ -133,20 +137,57 @@ if submitted:
     }
     input_df = pd.DataFrame([input_data])
 
-    # Predict probability
     proba = model.predict_proba(input_df)[0][1]
 
-    # Display results
+    st.session_state["input_df"] = input_df
+    st.session_state["proba"] = proba
+    st.session_state["predicted"] = True
+
+# Show results if predicted
+if st.session_state.get("predicted"):
+    input_df = st.session_state["input_df"]
+    proba = st.session_state["proba"]
+
     st.subheader("Prediction Results")
     st.metric("Heart Disease Risk Probability", f"{proba:.1%}")
 
     prediction = "High Risk" if proba >= threshold else "Low Risk"
     st.metric("Heart Disease Risk Classification", prediction, delta=f"Threshold: {threshold:.2f}")
 
-    st.info(f"🔔 Using threshold = {threshold:.2f}: "
-            f"Patients with probability ≥ {threshold:.0%} are classified as High Risk")
+    st.info(f"🔔 Using threshold = {threshold:.2f}: Patients with probability ≥ {threshold:.0%} are classified as High Risk")
 
-
-    # Show submitted data
     st.subheader("Submitted Patient Data")
     st.dataframe(input_df.style.format("{:.2f}", subset=meta['num_feats']))
+
+    show_feats = st.checkbox("Show Most Important Features", key="feat_importance")
+
+    if show_feats:
+        st.subheader("Top Health Factors Influencing Risk")
+
+        preprocessor = model.named_steps['pre']
+        xgb_model = model.named_steps['clf']
+
+        num_features = meta['num_feats']
+        cat_features = meta['cat_feats']
+
+        encoder = preprocessor.named_transformers_['cat'].named_steps['encoder']
+        encoded_cat_features = encoder.get_feature_names_out(cat_features)
+
+        final_feature_names = np.concatenate([num_features, encoded_cat_features])
+
+        assert len(final_feature_names) == len(xgb_model.feature_importances_), "Mismatch between feature names and model importance array"
+
+        importance_df = pd.DataFrame({
+            'Feature': final_feature_names,
+            'Importance': xgb_model.feature_importances_
+        }).sort_values(by='Importance', ascending=False)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.barplot(x='Importance', y='Feature', data=importance_df.head(10), palette='viridis')
+        ax.set_title("Top 10 Most Important Features")
+        st.pyplot(fig)
+
+st.markdown("""---""")
+st.info("⚠️ **Disclaimer**: This application provides risk estimates for educational purposes only. It is not a substitute for professional medical advice, diagnosis, or treatment. Always consult your healthcare provider.")
+
+st.markdown("**App created by: Jan Christer Oclarit**")

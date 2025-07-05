@@ -116,10 +116,14 @@ joblib.dump(pipe, 'model/best_heart_disease_model.joblib')
 print("Model saved to 'best_heart_disease_model.joblib'")
 
 # Save metadata
+all_feats = num_feats + cat_feats
+
 meta = {
     "num_feats": num_feats,
     "cat_feats": cat_feats,
+    "all_feats": all_feats,  
     "target": target
 }
+
 json.dump(meta, open('model/feature_metadata.json', 'w'))
 print("Feature metadata saved to 'feature_metadata.json'")
